@@ -16,8 +16,8 @@ import (
 	cosmath "cosmossdk.io/math"
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/sol"
 	"lukechampine.com/uint128"
 )
 
@@ -94,20 +94,14 @@ type AMMPool struct {
 	MarketEventQueue solana.PublicKey
 
 	// Pool balances
-	BaseAmount       cosmath.Int
-	QuoteAmount      cosmath.Int
-	BaseReserve      cosmath.Int
-	QuoteReserve     cosmath.Int
-	UserBaseAccount  solana.PublicKey
-	UserQuoteAccount solana.PublicKey
+	BaseAmount   cosmath.Int
+	QuoteAmount  cosmath.Int
+	BaseReserve  cosmath.Int
+	QuoteReserve cosmath.Int
 }
 
 func (pool *AMMPool) ProtocolName() pkg.ProtocolName {
 	return pkg.ProtocolNameRaydiumAmm
-}
-
-func (pool *AMMPool) ProtocolType() pkg.ProtocolType {
-	return pkg.ProtocolTypeRaydiumAmm
 }
 
 func (pool *AMMPool) GetProgramID() solana.PublicKey {
@@ -333,7 +327,7 @@ func (p *AMMPool) GetTokens() (baseMint, quoteMint string) {
 // It takes into account the current pool reserves and fees
 func (p *AMMPool) Quote(
 	ctx context.Context,
-	solClient *rpc.Client,
+	solClient *sol.Client,
 	inputMint string,
 	inputAmount cosmath.Int,
 ) (cosmath.Int, error) {
@@ -341,12 +335,7 @@ func (p *AMMPool) Quote(
 	accounts := make([]solana.PublicKey, 0)
 	accounts = append(accounts, p.BaseVault)
 	accounts = append(accounts, p.QuoteVault)
-	results, err := solClient.GetMultipleAccountsWithOpts(ctx,
-		accounts,
-		&rpc.GetMultipleAccountsOpts{
-			Commitment: rpc.CommitmentProcessed,
-		},
-	)
+	results, err := solClient.GetMultipleAccountsWithOpts(ctx, accounts)
 	if err != nil {
 		return math.NewInt(0), fmt.Errorf("batch request failed: %v", err)
 	}
@@ -408,11 +397,13 @@ func (p *AMMPool) Quote(
 // It handles both base-to-quote and quote-to-base swaps
 func (pool *AMMPool) BuildSwapInstructions(
 	ctx context.Context,
-	solClient *rpc.Client,
+	solClient *sol.Client,
 	user solana.PublicKey,
 	inputMint string,
 	inputAmount cosmath.Int,
 	minOut cosmath.Int,
+	userBaseAccount solana.PublicKey,
+	userQuoteAccount solana.PublicKey,
 ) ([]solana.Instruction, error) {
 	instrs := []solana.Instruction{}
 
@@ -427,11 +418,11 @@ func (pool *AMMPool) BuildSwapInstructions(
 	// Set up source and destination accounts based on swap direction
 	var fromAccount, toAccount solana.PublicKey
 	if inputValueMint.String() == pool.BaseMint.String() {
-		fromAccount = pool.UserBaseAccount
-		toAccount = pool.UserQuoteAccount
+		fromAccount = userBaseAccount
+		toAccount = userQuoteAccount
 	} else {
-		fromAccount = pool.UserQuoteAccount
-		toAccount = pool.UserBaseAccount
+		fromAccount = userQuoteAccount
+		toAccount = userBaseAccount
 	}
 
 	// Create swap instruction

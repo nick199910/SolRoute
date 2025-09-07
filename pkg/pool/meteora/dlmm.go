@@ -7,8 +7,8 @@ import (
 	"unsafe"
 
 	"github.com/gagliardetto/solana-go"
-	"github.com/yimingWOW/solroute/pkg"
-	"github.com/yimingWOW/solroute/pkg/sol"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
 // MeteoraDlmmPool represents a Meteora DLMM (Dynamic Liquidity Market Maker) pool
@@ -88,16 +88,10 @@ type MeteoraDlmmPool struct {
 	bitmapExtension    *BinArrayBitmapExtension
 	Clock              sol.Clock
 	orgActiveId        int32
-	UserBaseAccount    solana.PublicKey
-	UserQuoteAccount   solana.PublicKey
 }
 
 func (pool *MeteoraDlmmPool) ProtocolName() pkg.ProtocolName {
 	return pkg.ProtocolNameMeteoraDlmm
-}
-
-func (pool *MeteoraDlmmPool) ProtocolType() pkg.ProtocolType {
-	return pkg.ProtocolTypeMeteoraDlmm
 }
 
 func (pool *MeteoraDlmmPool) GetProgramID() solana.PublicKey {
@@ -412,7 +406,7 @@ func (pool *MeteoraDlmmPool) GetBinArrayForSwap(ctx context.Context, client *sol
 	activeBinArrayPubkeys = append(activeBinArrayPubkeys, negativeOrderActiveBinArrayPubkeys...)
 
 	// Fetch all bin array accounts in batch
-	results, err := client.RpcClient.GetMultipleAccounts(ctx, activeBinArrayPubkeys...)
+	results, err := client.GetMultipleAccountsWithOpts(ctx, activeBinArrayPubkeys)
 	if err != nil {
 		return fmt.Errorf("batch request failed: %w", err)
 	}

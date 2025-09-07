@@ -9,9 +9,9 @@ import (
 	"cosmossdk.io/math"
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg"
-	"github.com/yimingWOW/solroute/utils"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/anchor"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
 const (
@@ -45,19 +45,13 @@ type PumpAMMPool struct {
 	LpSupply              uint64
 	CoinCreator           solana.PublicKey
 
-	PoolId           solana.PublicKey
-	BaseAmount       math.Int
-	QuoteAmount      math.Int
-	UserBaseAccount  solana.PublicKey
-	UserQuoteAccount solana.PublicKey
+	PoolId      solana.PublicKey
+	BaseAmount  math.Int
+	QuoteAmount math.Int
 }
 
 func (pool *PumpAMMPool) ProtocolName() pkg.ProtocolName {
 	return pkg.ProtocolNamePumpAmm
-}
-
-func (pool *PumpAMMPool) ProtocolType() pkg.ProtocolType {
-	return pkg.ProtocolTypePumpAmm
 }
 
 func (pool *PumpAMMPool) GetProgramID() solana.PublicKey {
@@ -137,21 +131,29 @@ func (l *PumpAMMPool) GetTokens() (string, string) {
 
 func (s *PumpAMMPool) BuildSwapInstructions(
 	ctx context.Context,
-	solClient *rpc.Client,
+	solClient *sol.Client,
 	user solana.PublicKey,
 	inputMint string,
 	inputAmount math.Int,
 	minOut math.Int,
+	userBaseAccount solana.PublicKey,
+	userQuoteAccount solana.PublicKey,
 ) ([]solana.Instruction, error) {
 	if inputMint == s.BaseMint.String() {
-		return s.buyInAMMPool(user, s, inputAmount, minOut)
+		return s.buyInAMMPool(user, s, inputAmount, minOut, userBaseAccount, userQuoteAccount)
 	} else {
-		return s.sellInAMMPool(user, s, inputAmount, minOut)
+		return s.sellInAMMPool(user, s, inputAmount, minOut, userBaseAccount, userQuoteAccount)
 	}
 }
 
-func (s *PumpAMMPool) buyInAMMPool(userAddr solana.PublicKey, pool *PumpAMMPool,
-	maxInputAmountWithDecimals math.Int, outAmountWithDecimals math.Int) ([]solana.Instruction, error) {
+func (s *PumpAMMPool) buyInAMMPool(
+	userAddr solana.PublicKey,
+	pool *PumpAMMPool,
+	maxInputAmountWithDecimals math.Int,
+	outAmountWithDecimals math.Int,
+	userBaseAccount solana.PublicKey,
+	userQuoteAccount solana.PublicKey,
+) ([]solana.Instruction, error) {
 	// Initialize instruction array
 	instrs := []solana.Instruction{}
 
@@ -174,8 +176,8 @@ func (s *PumpAMMPool) buyInAMMPool(userAddr solana.PublicKey, pool *PumpAMMPool,
 	inst.AccountMetaSlice[2] = solana.NewAccountMeta(PumpGlobalConfig, false, false)
 	inst.AccountMetaSlice[3] = solana.NewAccountMeta(pool.BaseMint, false, false)
 	inst.AccountMetaSlice[4] = solana.NewAccountMeta(pool.QuoteMint, false, false)
-	inst.AccountMetaSlice[5] = solana.NewAccountMeta(pool.UserBaseAccount, true, false)
-	inst.AccountMetaSlice[6] = solana.NewAccountMeta(pool.UserQuoteAccount, true, false)
+	inst.AccountMetaSlice[5] = solana.NewAccountMeta(userBaseAccount, true, false)
+	inst.AccountMetaSlice[6] = solana.NewAccountMeta(userQuoteAccount, true, false)
 	inst.AccountMetaSlice[7] = solana.NewAccountMeta(pool.PoolBaseTokenAccount, true, false)
 	inst.AccountMetaSlice[8] = solana.NewAccountMeta(pool.PoolQuoteTokenAccount, true, false)
 	inst.AccountMetaSlice[9] = solana.NewAccountMeta(PumpProtocolFeeRecipient, false, false)
@@ -204,8 +206,14 @@ func (s *PumpAMMPool) buyInAMMPool(userAddr solana.PublicKey, pool *PumpAMMPool,
 	return instrs, nil
 }
 
-func (s *PumpAMMPool) sellInAMMPool(userAddr solana.PublicKey,
-	pool *PumpAMMPool, baseAmountIn math.Int, minQuoteAmountOut math.Int) ([]solana.Instruction, error) {
+func (s *PumpAMMPool) sellInAMMPool(
+	userAddr solana.PublicKey,
+	pool *PumpAMMPool,
+	baseAmountIn math.Int,
+	minQuoteAmountOut math.Int,
+	userBaseAccount solana.PublicKey,
+	userQuoteAccount solana.PublicKey,
+) ([]solana.Instruction, error) {
 	instrs := []solana.Instruction{}
 
 	inst := SellSwapInstruction{
@@ -220,14 +228,13 @@ func (s *PumpAMMPool) sellInAMMPool(userAddr solana.PublicKey,
 	inst.BaseVariant = bin.BaseVariant{
 		Impl: inst,
 	}
-	// 确保使用正确的 Token Program 地址
 	inst.AccountMetaSlice[0] = solana.NewAccountMeta(pool.PoolId, false, false)
 	inst.AccountMetaSlice[1] = solana.NewAccountMeta(userAddr, true, true)
 	inst.AccountMetaSlice[2] = solana.NewAccountMeta(PumpGlobalConfig, false, false)
 	inst.AccountMetaSlice[3] = solana.NewAccountMeta(pool.BaseMint, false, false)
 	inst.AccountMetaSlice[4] = solana.NewAccountMeta(pool.QuoteMint, false, false)
-	inst.AccountMetaSlice[5] = solana.NewAccountMeta(pool.UserBaseAccount, true, false)
-	inst.AccountMetaSlice[6] = solana.NewAccountMeta(pool.UserQuoteAccount, true, false)
+	inst.AccountMetaSlice[5] = solana.NewAccountMeta(userBaseAccount, true, false)
+	inst.AccountMetaSlice[6] = solana.NewAccountMeta(userQuoteAccount, true, false)
 	inst.AccountMetaSlice[7] = solana.NewAccountMeta(pool.PoolBaseTokenAccount, true, false)
 	inst.AccountMetaSlice[8] = solana.NewAccountMeta(pool.PoolQuoteTokenAccount, true, false)
 	inst.AccountMetaSlice[9] = solana.NewAccountMeta(PumpProtocolFeeRecipient, false, false)
@@ -277,7 +284,7 @@ func (inst *BuySwapInstruction) Data() ([]byte, error) {
 	// Write discriminator for swap instruction
 	namespace := "global"
 	name := "buy"
-	discriminator := utils.GetDiscriminator(namespace, name)
+	discriminator := anchor.GetDiscriminator(namespace, name)
 	if _, err := buf.Write(discriminator); err != nil {
 		return nil, fmt.Errorf("failed to write discriminator: %w", err)
 	}
@@ -312,13 +319,12 @@ func (inst *SellSwapInstruction) Accounts() (out []*solana.AccountMeta) {
 
 func (inst *SellSwapInstruction) Data() ([]byte, error) {
 
-	// 手动构建指令数据
 	buf := new(bytes.Buffer)
 
 	// Write discriminator for swap instruction
 	namespace := "global"
 	name := "sell"
-	discriminator := utils.GetDiscriminator(namespace, name)
+	discriminator := anchor.GetDiscriminator(namespace, name)
 	if _, err := buf.Write(discriminator); err != nil {
 		return nil, fmt.Errorf("failed to write discriminator: %w", err)
 	}
@@ -336,17 +342,12 @@ func (inst *SellSwapInstruction) Data() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (pool *PumpAMMPool) Quote(ctx context.Context, solClient *rpc.Client, inputMint string, inputAmount math.Int) (math.Int, error) {
+func (pool *PumpAMMPool) Quote(ctx context.Context, solClient *sol.Client, inputMint string, inputAmount math.Int) (math.Int, error) {
 	// update pool data first
 	accounts := make([]solana.PublicKey, 0)
 	accounts = append(accounts, pool.PoolBaseTokenAccount)
 	accounts = append(accounts, pool.PoolQuoteTokenAccount)
-	results, err := solClient.GetMultipleAccountsWithOpts(ctx,
-		accounts,
-		&rpc.GetMultipleAccountsOpts{
-			Commitment: rpc.CommitmentProcessed,
-		},
-	)
+	results, err := solClient.GetMultipleAccountsWithOpts(ctx, accounts)
 	if err != nil {
 		return math.NewInt(0), fmt.Errorf("batch request failed: %v", err)
 	}

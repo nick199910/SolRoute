@@ -9,8 +9,8 @@ import (
 	cosmath "cosmossdk.io/math"
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
 // CPMMPool represents the on-chain pool state
@@ -40,8 +40,6 @@ type CPMMPool struct {
 	_padding2          [32]uint64       // 256 bytes padding
 
 	PoolId           solana.PublicKey
-	UserBaseAccount  solana.PublicKey
-	UserQuoteAccount solana.PublicKey
 	BaseAmount       cosmath.Int
 	QuoteAmount      cosmath.Int
 	BaseReserve      cosmath.Int
@@ -54,10 +52,6 @@ type CPMMPool struct {
 
 func (pool *CPMMPool) ProtocolName() pkg.ProtocolName {
 	return pkg.ProtocolNameRaydiumCpmm
-}
-
-func (pool *CPMMPool) ProtocolType() pkg.ProtocolType {
-	return pkg.ProtocolTypeRaydiumCpmm
 }
 
 func (pool *CPMMPool) GetProgramID() solana.PublicKey {
@@ -98,14 +92,15 @@ func (pool *CPMMPool) GetTokens() (string, string) {
 
 func (pool *CPMMPool) BuildSwapInstructions(
 	ctx context.Context,
-	solClient *rpc.Client,
+	solClient *sol.Client,
 	userAddr solana.PublicKey,
 	inputMint string,
 	amountIn math.Int,
 	minOutAmountWithDecimals math.Int,
+	userBaseAccount solana.PublicKey,
+	userQuoteAccount solana.PublicKey,
 ) ([]solana.Instruction, error) {
 
-	// 初始化指令数组
 	instrs := []solana.Instruction{}
 
 	var inputValueMint solana.PublicKey
@@ -115,17 +110,6 @@ func (pool *CPMMPool) BuildSwapInstructions(
 		inputValueMint = pool.Token1Mint
 	}
 
-	var fromAccount solana.PublicKey
-	var toAccount solana.PublicKey
-	if inputValueMint.String() == pool.Token0Mint.String() {
-		fromAccount = pool.UserBaseAccount
-		toAccount = pool.UserQuoteAccount
-	} else {
-		fromAccount = pool.UserQuoteAccount
-		toAccount = pool.UserBaseAccount
-	}
-
-	// 创建 swap 指令
 	swapInst := CPMMSwapInstruction{
 		InAmount:         amountIn.Uint64(),
 		MinimumOutAmount: minOutAmountWithDecimals.Uint64(),
@@ -140,19 +124,29 @@ func (pool *CPMMPool) BuildSwapInstructions(
 	if err != nil {
 		return nil, fmt.Errorf("failed to get authority PDA: %v", err)
 	}
-	// 设置账户
-	swapInst.AccountMetaSlice[0] = solana.NewAccountMeta(userAddr, true, true)                // payer
-	swapInst.AccountMetaSlice[1] = solana.NewAccountMeta(authority, false, false)             // authority
-	swapInst.AccountMetaSlice[2] = solana.NewAccountMeta(pool.AmmConfig, false, false)        // amm_config
-	swapInst.AccountMetaSlice[3] = solana.NewAccountMeta(pool.PoolId, true, false)            // pool_state
-	swapInst.AccountMetaSlice[4] = solana.NewAccountMeta(fromAccount, true, false)            // input_token_account
-	swapInst.AccountMetaSlice[5] = solana.NewAccountMeta(toAccount, true, false)              // output_token_account
-	swapInst.AccountMetaSlice[6] = solana.NewAccountMeta(pool.Token0Vault, true, false)       // input_vault
-	swapInst.AccountMetaSlice[7] = solana.NewAccountMeta(pool.Token1Vault, true, false)       // output_vault
+	swapInst.AccountMetaSlice[0] = solana.NewAccountMeta(userAddr, true, true)         // payer
+	swapInst.AccountMetaSlice[1] = solana.NewAccountMeta(authority, false, false)      // authority
+	swapInst.AccountMetaSlice[2] = solana.NewAccountMeta(pool.AmmConfig, false, false) // amm_config
+	swapInst.AccountMetaSlice[3] = solana.NewAccountMeta(pool.PoolId, true, false)     // pool_state
+	if inputValueMint.String() == pool.Token0Mint.String() {
+		swapInst.AccountMetaSlice[4] = solana.NewAccountMeta(userBaseAccount, true, false)   // input_token_account
+		swapInst.AccountMetaSlice[5] = solana.NewAccountMeta(userQuoteAccount, true, false)  // output_token_account
+		swapInst.AccountMetaSlice[6] = solana.NewAccountMeta(pool.Token0Vault, true, false)  // input_vault
+		swapInst.AccountMetaSlice[7] = solana.NewAccountMeta(pool.Token1Vault, true, false)  // output_vault
+		swapInst.AccountMetaSlice[10] = solana.NewAccountMeta(pool.Token0Mint, false, false) // input_token_mint
+		swapInst.AccountMetaSlice[11] = solana.NewAccountMeta(pool.Token1Mint, false, false) // output_token_mint
+
+	} else {
+		swapInst.AccountMetaSlice[4] = solana.NewAccountMeta(userQuoteAccount, true, false)  // input_token_account
+		swapInst.AccountMetaSlice[5] = solana.NewAccountMeta(userBaseAccount, true, false)   // output_token_account
+		swapInst.AccountMetaSlice[6] = solana.NewAccountMeta(pool.Token1Vault, true, false)  // input_vault
+		swapInst.AccountMetaSlice[7] = solana.NewAccountMeta(pool.Token0Vault, true, false)  // output_vault
+		swapInst.AccountMetaSlice[10] = solana.NewAccountMeta(pool.Token1Mint, false, false) // input_token_mint
+		swapInst.AccountMetaSlice[11] = solana.NewAccountMeta(pool.Token0Mint, false, false) // output_token_mint
+
+	}
 	swapInst.AccountMetaSlice[8] = solana.NewAccountMeta(solana.TokenProgramID, false, false) // input_token_program
 	swapInst.AccountMetaSlice[9] = solana.NewAccountMeta(solana.TokenProgramID, false, false) // output_token_program
-	swapInst.AccountMetaSlice[10] = solana.NewAccountMeta(pool.Token0Mint, false, false)      // input_token_mint
-	swapInst.AccountMetaSlice[11] = solana.NewAccountMeta(pool.Token1Mint, false, false)      // output_token_mint
 	swapInst.AccountMetaSlice[12] = solana.NewAccountMeta(pool.ObservationKey, true, false)   // observation_state
 	instrs = append(instrs, &swapInst)
 
@@ -203,17 +197,12 @@ func getAuthorityPDA() (solana.PublicKey, uint8, error) {
 	return authority, bump, nil
 }
 
-func (pool *CPMMPool) Quote(ctx context.Context, solClient *rpc.Client, inputMint string, inputAmount math.Int) (math.Int, error) {
+func (pool *CPMMPool) Quote(ctx context.Context, solClient *sol.Client, inputMint string, inputAmount math.Int) (math.Int, error) {
 	// update pool data first
 	accounts := make([]solana.PublicKey, 0)
 	accounts = append(accounts, pool.Token0Vault)
 	accounts = append(accounts, pool.Token1Vault)
-	results, err := solClient.GetMultipleAccountsWithOpts(ctx,
-		accounts,
-		&rpc.GetMultipleAccountsOpts{
-			Commitment: rpc.CommitmentProcessed,
-		},
-	)
+	results, err := solClient.GetMultipleAccountsWithOpts(ctx, accounts)
 	if err != nil {
 		return math.NewInt(0), fmt.Errorf("batch request failed: %v", err)
 	}

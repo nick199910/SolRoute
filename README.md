@@ -46,7 +46,7 @@ instructions, err := bestPool.BuildSwapInstructions(ctx, solClient.RpcClient,
 ## Installation
 
 ```bash
-go get github.com/yimingWOW/solroute
+go get github.com/yimingwow/solroute
 ```
 
 ## Project Structure
@@ -61,9 +61,20 @@ solroute/
 │   └── sol/         # Solana client
 ```
 
+## Some useful func
+
+This section highlights essential utility functions that can help streamline your development workflow:
+
+- pkg/anchor/anchor.go GetDiscriminator
+- pkg/sol/wsol_account.go CoverWsol CloseWsol
+- pkg/sol/jito.go golang sdk of Jito
+- utils/beautiful_address.go FindKeyPairWithPrefix FindKeyPairWithSuffix
+
+
+
 ## Contribution
 
-Contributed by [yimingWOW](https://github.com/yimingWOW) from [Solar](https://www.solar.team/).
+Contributed by [yimingwow](https://github.com/yimingwow) from [Solar](https://www.solar.team/).
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 

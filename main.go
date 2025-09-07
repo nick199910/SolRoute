@@ -6,56 +6,57 @@ import (
 
 	"cosmossdk.io/math"
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg/protocol"
-	"github.com/yimingWOW/solroute/pkg/router"
-	"github.com/yimingWOW/solroute/pkg/sol"
+	"github.com/yimingwow/solroute/pkg/protocol"
+	"github.com/yimingwow/solroute/pkg/router"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
-const (
-	privateKeyStr = ""
-	// RPC endpoints
-	mainnetRPC   = ""
-	mainnetWSRPC = ""
-
+var (
+	privateKey = ""
+	rpc        = ""
+	jitoRpc    = ""
 	// Token addresses
-	usdcTokenAddr = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+	inTokenAddr  = sol.WSOL
+	outTokenAddr = solana.MustPublicKeyFromBase58("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
 
 	// Swap parameters
-	defaultAmountIn = 1000000000 // 1 sol (9 decimals)
-	slippageBps     = 100        // 1% slippage
+	defaultAmountIn = int64(10000000) // 0.01 sol (9 decimals)
+	solDecimal      = float64(1e9)
+	slippageBps     = 100 // 1% slippage
+	useJito         = false
+	isSimulate      = true
 )
 
 func main() {
-	// TODO: Initialize private key from environment or config file
-	privateKey := solana.MustPrivateKeyFromBase58(privateKeyStr)
-	log.Printf("PublicKey: %v", privateKey.PublicKey())
+	log.Printf("🚀🚀🚀parpering to earn...")
+
+	privateKey := solana.MustPrivateKeyFromBase58(privateKey)
+	log.Printf("😈get your public key: %v", privateKey.PublicKey())
 
 	ctx := context.Background()
-	solClient, err := sol.NewClient(ctx, mainnetRPC, mainnetWSRPC)
+	solClient, err := sol.NewClient(ctx, rpc, jitoRpc, 20) // 50 requests per second
 	if err != nil {
 		log.Fatalf("Failed to create solana client: %v", err)
 	}
-	defer solClient.Close()
 
 	// check balance first
-	balance, err := solClient.GetUserTokenBalance(ctx, privateKey.PublicKey(), sol.WSOL)
-	if err != nil {
+	inTokenAccount, balance, err := solClient.GetUserTokenBalance(ctx, privateKey.PublicKey(), inTokenAddr)
+	if err != nil && err.Error() != "no token account found" {
 		log.Fatalf("Failed to get user token balance: %v", err)
 	}
-	log.Printf("User token balance: %v", balance)
-	if balance < 10000000 {
-		err = solClient.CoverWsol(ctx, privateKey, 10000000)
+	log.Printf("😈You have %v wsol", balance)
+	if err != nil || balance < uint64(defaultAmountIn) {
+		log.Printf("🧐You don't have enough wsol, covering %f wsol...", float64(defaultAmountIn)/solDecimal)
+		err = solClient.CoverWsol(ctx, privateKey, defaultAmountIn)
 		if err != nil {
 			log.Fatalf("Failed to cover wsol: %v", err)
 		}
 	}
-
-	tokenAccount, err := solClient.SelectOrCreateSPLTokenAccount(ctx, privateKey, solana.MustPublicKeyFromBase58(usdcTokenAddr))
+	outTokenAccount, err := solClient.SelectOrCreateSPLTokenAccount(ctx, privateKey, outTokenAddr)
 	if err != nil {
 		log.Fatalf("Failed to get user token balance: %v", err)
 	}
-	log.Printf("USDC token account: %v", tokenAccount.String())
+	log.Printf("😈Your token account: %v", outTokenAccount.String())
 
 	router := router.NewSimpleRouter(
 		protocol.NewPumpAmm(solClient),
@@ -66,45 +67,52 @@ func main() {
 	)
 
 	// Query available pools
-	pools, err := router.QueryAllPools(ctx, usdcTokenAddr, sol.WSOL.String())
+	log.Printf("⌛️Querying available pools...")
+	err = router.QueryAllPools(ctx, inTokenAddr.String(), outTokenAddr.String())
 	if err != nil {
 		log.Fatalf("Failed to query all pools: %v", err)
 	}
-	for _, pool := range pools {
-		log.Printf("Found pool: %v", pool.GetID())
-	}
+	log.Printf("👌Found %d pools", len(router.Pools))
 
-	// Find best pool for the swap
+	signers := []solana.PrivateKey{}
+	instructions := make([]solana.Instruction, 0)
+
 	amountIn := math.NewInt(defaultAmountIn)
-	bestPool, amountOut, err := router.GetBestPool(ctx, solClient.RpcClient, sol.WSOL.String(), usdcTokenAddr, amountIn)
+	bestPool, amountOut, err := router.GetBestPool(ctx, solClient, inTokenAddr.String(), amountIn)
 	if err != nil {
 		log.Fatalf("Failed to get best pool: %v", err)
 	}
-	log.Printf("Selected best pool: %v", bestPool.GetID())
-	log.Printf("Expected output amount: %v", amountOut)
+	log.Printf("Selected best pool: %v, amountOut: %v", bestPool.GetID(), amountOut)
 
-	// Calculate minimum output amount with slippage
-	minAmountOut := amountOut.Mul(math.NewInt(10000 - slippageBps)).Quo(math.NewInt(10000))
-
-	// Build swap instructions
-	instructions, err := bestPool.BuildSwapInstructions(ctx, solClient.RpcClient,
-		privateKey.PublicKey(), usdcTokenAddr, amountIn, minAmountOut)
+	minAmountOut := amountOut.Mul(math.NewInt(int64(10000 - slippageBps))).Quo(math.NewInt(10000))
+	instructionsBuy, err := bestPool.BuildSwapInstructions(ctx, solClient,
+		privateKey.PublicKey(), inTokenAddr.String(), amountIn, minAmountOut, inTokenAccount, outTokenAccount)
 	if err != nil {
 		log.Fatalf("Failed to build swap instructions: %v", err)
 	}
-	log.Printf("Generated swap instructions: %v", instructions)
+	signers = append(signers, privateKey)
+	instructions = append(instructions, instructionsBuy...)
 
-	// Prepare transaction
-	signers := []solana.PrivateKey{privateKey}
-	res, err := solClient.RpcClient.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
+	tx, err := solClient.SignTransaction(ctx, signers, instructions...)
 	if err != nil {
-		log.Fatalf("Failed to get blockhash: %v", err)
+		log.Fatalf("Failed to SendTx: %v", err)
 	}
 
-	// Send transaction
-	sig, err := solClient.SendTx(ctx, res.Value.Blockhash, signers, instructions, true)
-	if err != nil {
-		log.Fatalf("Failed to send transaction: %v", err)
+	if isSimulate {
+		if _, err := solClient.SimulateTransaction(ctx, tx); err != nil {
+			log.Fatalf("Failed to simulate transaction: %v", err)
+		}
 	}
-	log.Printf("Transaction successful: https://solscan.io/tx/%v", sig)
+	if useJito {
+		_, err = solClient.SendTxWithJito(ctx, 1000000, signers, tx)
+		if err != nil {
+			log.Fatalf("Failed to SendTxWithJito: %v", err)
+		}
+	} else {
+		sig, err := solClient.SendTx(ctx, tx)
+		if err != nil {
+			log.Fatalf("Failed to SendTx: %v", err)
+		}
+		log.Printf("Transaction successful: https://solscan.io/tx/%v", sig)
+	}
 }

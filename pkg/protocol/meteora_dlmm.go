@@ -7,9 +7,9 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg"
-	"github.com/yimingWOW/solroute/pkg/pool/meteora"
-	"github.com/yimingWOW/solroute/pkg/sol"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/pool/meteora"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
 // MeteoraDlmmProtocol handles interactions with Meteora DLMM (Dynamic Liquidity Market Maker) pools
@@ -24,6 +24,10 @@ func NewMeteoraDlmm(solClient *sol.Client) *MeteoraDlmmProtocol {
 	}
 }
 
+func (protocol *MeteoraDlmmProtocol) ProtocolName() pkg.ProtocolName {
+	return pkg.ProtocolNameMeteoraDlmm
+}
+
 // FetchPoolsByPair retrieves all Meteora DLMM pools for a given token pair
 func (protocol *MeteoraDlmmProtocol) FetchPoolsByPair(ctx context.Context, baseMint string, quoteMint string) ([]pkg.Pool, error) {
 	programAccounts := rpc.GetProgramAccountsResult{}
@@ -34,13 +38,6 @@ func (protocol *MeteoraDlmmProtocol) FetchPoolsByPair(ctx context.Context, baseM
 		return nil, fmt.Errorf("failed to fetch pools with baseMint as TokenX: %w", err)
 	}
 	programAccounts = append(programAccounts, baseQuotePools...)
-
-	// Fetch pools with quoteMint as TokenX and baseMint as TokenY
-	quoteBasePools, err := protocol.getMeteoraDlmmPoolAccountsByTokenPair(ctx, quoteMint, baseMint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pools with quoteMint as TokenX: %w", err)
-	}
-	programAccounts = append(programAccounts, quoteBasePools...)
 
 	pools := make([]pkg.Pool, 0, len(programAccounts))
 	for _, account := range programAccounts {
@@ -65,7 +62,7 @@ func (protocol *MeteoraDlmmProtocol) FetchPoolsByPair(ctx context.Context, baseM
 // getMeteoraDlmmPoolAccountsByTokenPair retrieves pool accounts for a specific token pair configuration
 func (protocol *MeteoraDlmmProtocol) getMeteoraDlmmPoolAccountsByTokenPair(ctx context.Context, baseMint string, quoteMint string) (rpc.GetProgramAccountsResult, error) {
 	var poolLayout meteora.MeteoraDlmmPool
-	result, err := protocol.SolClient.RpcClient.GetProgramAccountsWithOpts(ctx, meteora.MeteoraProgramID, &rpc.GetProgramAccountsOpts{
+	result, err := protocol.SolClient.GetProgramAccountsWithOpts(ctx, meteora.MeteoraProgramID, &rpc.GetProgramAccountsOpts{
 		Filters: []rpc.RPCFilter{
 			{
 				DataSize: 904, // Meteora DLMM pool account size
@@ -93,7 +90,7 @@ func (protocol *MeteoraDlmmProtocol) getMeteoraDlmmPoolAccountsByTokenPair(ctx c
 // FetchPoolByID retrieves a specific Meteora DLMM pool by its ID
 func (protocol *MeteoraDlmmProtocol) FetchPoolByID(ctx context.Context, poolID string) (pkg.Pool, error) {
 	poolData := &meteora.MeteoraDlmmPool{}
-	account, err := protocol.SolClient.RpcClient.GetAccountInfo(ctx, solana.MustPublicKeyFromBase58(poolID))
+	account, err := protocol.SolClient.GetAccountInfoWithOpts(ctx, solana.MustPublicKeyFromBase58(poolID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pool account: %w", err)
 	}

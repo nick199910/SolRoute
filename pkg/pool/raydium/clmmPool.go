@@ -14,8 +14,8 @@ import (
 	cosmath "cosmossdk.io/math"
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/sol"
 	"lukechampine.com/uint128"
 )
 
@@ -72,8 +72,6 @@ type CLMMPool struct {
 	ExBitmapAddress   solana.PublicKey
 	exTickArrayBitmap *TickArrayBitmapExtensionType
 	TickArrayCache    map[string]TickArray
-	UserBaseAccount   solana.PublicKey
-	UserQuoteAccount  solana.PublicKey
 }
 
 type RewardInfo struct {
@@ -92,10 +90,6 @@ type RewardInfo struct {
 
 func (pool *CLMMPool) ProtocolName() pkg.ProtocolName {
 	return pkg.ProtocolNameRaydiumClmm
-}
-
-func (pool *CLMMPool) ProtocolType() pkg.ProtocolType {
-	return pkg.ProtocolTypeRaydiumClmm
 }
 
 func (pool *CLMMPool) GetProgramID() solana.PublicKey {
@@ -284,52 +278,35 @@ func (l *CLMMPool) Offset(field string) uint64 {
 }
 
 func (l *CLMMPool) CurrentPrice() float64 {
-	// 转换为 float64
 	sqrtPrice, _ := l.SqrtPriceX64.Big().Float64()
-	// Q64.64 格式转换
 	sqrtPrice = sqrtPrice / math.Pow(2, 64)
-	// 计算实际价格
 	price := sqrtPrice * sqrtPrice
 	return price
 }
 
 func (p *CLMMPool) BuildSwapInstructions(
 	ctx context.Context,
-	solClient *rpc.Client,
+	solClient *sol.Client,
 	userAddr solana.PublicKey,
 	inputMint string,
 	amountIn cosmath.Int,
 	minOutAmountWithDecimals cosmath.Int,
+	userBaseAccount solana.PublicKey,
+	userQuoteAccount solana.PublicKey,
 ) ([]solana.Instruction, error) {
 
-	// 初始化指令数组和签名者
 	instrs := []solana.Instruction{}
 
 	var inputValueMint solana.PublicKey
 	var outputValueMint solana.PublicKey
-	var inputValue solana.PublicKey
-	var outputValue solana.PublicKey
 	if inputMint == p.TokenMint0.String() {
+		log.Printf("inputMint: %v, p.TokenMint0: %v", inputMint, p.TokenMint0.String())
 		inputValueMint = p.TokenMint0
 		outputValueMint = p.TokenMint1
-		inputValue = p.TokenVault0
-		outputValue = p.TokenVault1
 	} else {
+		log.Printf("inputMint: %v, p.TokenMint1: %v", inputMint, p.TokenMint1.String())
 		inputValueMint = p.TokenMint1
 		outputValueMint = p.TokenMint0
-		inputValue = p.TokenVault1
-		outputValue = p.TokenVault0
-	}
-
-	// Create toAccount if needed
-	var fromAccount solana.PublicKey
-	var toAccount solana.PublicKey
-	if inputValueMint.String() == p.TokenMint0.String() {
-		fromAccount = p.UserBaseAccount
-		toAccount = p.UserQuoteAccount
-	} else {
-		fromAccount = p.UserQuoteAccount
-		toAccount = p.UserBaseAccount
 	}
 
 	inst := RayCLMMSwapInstruction{
@@ -337,28 +314,34 @@ func (p *CLMMPool) BuildSwapInstructions(
 		OtherAmountThreshold: minOutAmountWithDecimals.Uint64(),
 		SqrtPriceLimitX64:    uint128.Zero,
 		IsBaseInput:          inputValueMint == p.TokenMint0,
-		AccountMetaSlice:     make(solana.AccountMetaSlice, 0),
+		AccountMetaSlice:     make(solana.AccountMetaSlice, 16),
 	}
 	inst.BaseVariant = bin.BaseVariant{
 		Impl: inst,
 	}
 
 	// Set up account metas in the correct order according to SDK
-	inst.AccountMetaSlice = append(inst.AccountMetaSlice,
-		solana.NewAccountMeta(userAddr, false, true),               // payer (is_signer = true, is_writable = false)
-		solana.NewAccountMeta(p.AmmConfig, false, false),           // ammConfigId
-		solana.NewAccountMeta(p.PoolId, true, false),               // poolId
-		solana.NewAccountMeta(fromAccount, true, false),            // inputTokenAccount (is_writable = true, is_signer = false)
-		solana.NewAccountMeta(toAccount, true, false),              // outputTokenAccount (is_writable = true, is_signer = false)
-		solana.NewAccountMeta(inputValue, true, false),             // inputVault
-		solana.NewAccountMeta(outputValue, true, false),            // outputVault
-		solana.NewAccountMeta(p.ObservationKey, true, false),       // observationId
-		solana.NewAccountMeta(solana.TokenProgramID, false, false), // TOKEN_PROGRAM_ID
-		solana.NewAccountMeta(TOKEN_2022_PROGRAM_ID, false, false), // TOKEN_2022_PROGRAM_ID
-		solana.NewAccountMeta(MEMO_PROGRAM_ID, false, false),       // MEMO_PROGRAM_ID
-		solana.NewAccountMeta(inputValueMint, false, false),        // inputMint
-		solana.NewAccountMeta(outputValueMint, false, false),       // inputMint
-	)
+	inst.AccountMetaSlice[0] = solana.NewAccountMeta(userAddr, false, true)
+	inst.AccountMetaSlice[1] = solana.NewAccountMeta(p.AmmConfig, false, false)
+	inst.AccountMetaSlice[2] = solana.NewAccountMeta(p.PoolId, true, false)
+
+	if inputMint == p.TokenMint0.String() {
+		inst.AccountMetaSlice[3] = solana.NewAccountMeta(userBaseAccount, true, false)
+		inst.AccountMetaSlice[4] = solana.NewAccountMeta(userQuoteAccount, true, false)
+		inst.AccountMetaSlice[5] = solana.NewAccountMeta(p.TokenVault0, true, false)
+		inst.AccountMetaSlice[6] = solana.NewAccountMeta(p.TokenVault1, true, false)
+	} else {
+		inst.AccountMetaSlice[3] = solana.NewAccountMeta(userQuoteAccount, true, false)
+		inst.AccountMetaSlice[4] = solana.NewAccountMeta(userBaseAccount, true, false)
+		inst.AccountMetaSlice[5] = solana.NewAccountMeta(p.TokenVault1, true, false)
+		inst.AccountMetaSlice[6] = solana.NewAccountMeta(p.TokenVault0, true, false)
+	}
+	inst.AccountMetaSlice[7] = solana.NewAccountMeta(p.ObservationKey, true, false)
+	inst.AccountMetaSlice[8] = solana.NewAccountMeta(solana.TokenProgramID, false, false)
+	inst.AccountMetaSlice[9] = solana.NewAccountMeta(TOKEN_2022_PROGRAM_ID, false, false)
+	inst.AccountMetaSlice[10] = solana.NewAccountMeta(MEMO_PROGRAM_ID, false, false)
+	inst.AccountMetaSlice[11] = solana.NewAccountMeta(inputValueMint, false, false)
+	inst.AccountMetaSlice[12] = solana.NewAccountMeta(outputValueMint, false, false)
 
 	// Add bitmap extension as remaining account if it exists
 	exBitmapAddress, _, err := GetPdaExBitmapAccount(RAYDIUM_CLMM_PROGRAM_ID, p.PoolId)
@@ -366,7 +349,7 @@ func (p *CLMMPool) BuildSwapInstructions(
 		log.Printf("get pda address error: %v", err)
 		return nil, fmt.Errorf("get pda address error: %v", err)
 	}
-	inst.AccountMetaSlice = append(inst.AccountMetaSlice, solana.NewAccountMeta(exBitmapAddress, true, false)) // exTickArrayBitmap (is_writable = true, is_signer = false)
+	inst.AccountMetaSlice[13] = solana.NewAccountMeta(exBitmapAddress, true, false) // exTickArrayBitmap (is_writable = true, is_signer = false)
 
 	// Add tick arrays as remaining accounts
 	remainingAccounts, err := p.GetRemainAccounts(ctx, solClient, inputValueMint.String())
@@ -374,10 +357,9 @@ func (p *CLMMPool) BuildSwapInstructions(
 		log.Printf("GetRemainAccounts error: %v", err)
 		return nil, err
 	}
+	inst.AccountMetaSlice[14] = solana.NewAccountMeta(remainingAccounts[0], true, false)
+	inst.AccountMetaSlice[15] = solana.NewAccountMeta(remainingAccounts[1], true, false)
 
-	for _, tickArray := range remainingAccounts {
-		inst.AccountMetaSlice = append(inst.AccountMetaSlice, solana.NewAccountMeta(tickArray, true, false)) // tickArrays (is_writable = true, is_signer = false)
-	}
 	instrs = append(instrs, &inst)
 
 	return instrs, nil
@@ -449,14 +431,9 @@ func (pool *CLMMPool) GetTokens() (baseMint, quoteMint string) {
 	return pool.TokenMint0.String(), pool.TokenMint1.String()
 }
 
-func (pool *CLMMPool) Quote(ctx context.Context, solClient *rpc.Client, inputMint string, inputAmount cosmath.Int) (cosmath.Int, error) {
+func (pool *CLMMPool) Quote(ctx context.Context, solClient *sol.Client, inputMint string, inputAmount cosmath.Int) (cosmath.Int, error) {
 	// update pool state first
-	results, err := solClient.GetMultipleAccountsWithOpts(ctx,
-		[]solana.PublicKey{pool.ExBitmapAddress},
-		&rpc.GetMultipleAccountsOpts{
-			Commitment: rpc.CommitmentProcessed,
-		},
-	)
+	results, err := solClient.GetMultipleAccountsWithOpts(ctx, []solana.PublicKey{pool.ExBitmapAddress})
 	if err != nil {
 		return cosmath.Int{}, fmt.Errorf("batch request failed: %v", err)
 	}
@@ -468,9 +445,7 @@ func (pool *CLMMPool) Quote(ctx context.Context, solClient *rpc.Client, inputMin
 	if err != nil {
 		return cosmath.Int{}, fmt.Errorf("get tick array address error: %v", err)
 	}
-	results, err = solClient.GetMultipleAccountsWithOpts(ctx, tickArrayAddresses, &rpc.GetMultipleAccountsOpts{
-		Commitment: rpc.CommitmentProcessed,
-	})
+	results, err = solClient.GetMultipleAccountsWithOpts(ctx, tickArrayAddresses)
 	if err != nil {
 		log.Printf("batch request failed: %v", err)
 		return cosmath.Int{}, fmt.Errorf("batch request failed: %v", err)
@@ -701,7 +676,7 @@ func (pool *CLMMPool) swapCompute(
 // GetRemainAccounts returns the remaining accounts needed for the swap
 func (pool *CLMMPool) GetRemainAccounts(
 	ctx context.Context,
-	client *rpc.Client,
+	client *sol.Client,
 	inputTokenMint string,
 ) ([]solana.PublicKey, error) {
 	// Determine swap direction
@@ -727,6 +702,8 @@ func (pool *CLMMPool) GetRemainAccounts(
 
 	exTickArrayBitmapAddress := getPdaTickArrayAddress(RAYDIUM_CLMM_PROGRAM_ID, pool.PoolId, tickAarrayStartIndex)
 	allNeededAccounts = append(allNeededAccounts, exTickArrayBitmapAddress)
-
+	if exTickArrayBitmapAddress.String() == firstTickArray.String() {
+		return nil, errors.New("exTickArrayBitmapAddress is the same as firstTickArray")
+	}
 	return allNeededAccounts, nil
 }

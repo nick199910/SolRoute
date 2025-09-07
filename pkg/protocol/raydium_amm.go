@@ -9,9 +9,9 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg"
-	"github.com/yimingWOW/solroute/pkg/pool/raydium"
-	"github.com/yimingWOW/solroute/pkg/sol"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/pool/raydium"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
 type RaydiumAMMProtocol struct {
@@ -24,16 +24,15 @@ func NewRaydiumAmm(solClient *sol.Client) *RaydiumAMMProtocol {
 	}
 }
 
+func (p *RaydiumAMMProtocol) ProtocolName() pkg.ProtocolName {
+	return pkg.ProtocolNameRaydiumAmm
+}
+
 func (p *RaydiumAMMProtocol) FetchPoolsByPair(ctx context.Context, baseMint, quoteMint string) ([]pkg.Pool, error) {
 	accounts := make([]*rpc.KeyedAccount, 0)
 	programAccounts, err := p.getAMMPoolAccountsByTokenPair(ctx, baseMint, quoteMint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch pools with base token %s: %w", baseMint, err)
-	}
-	accounts = append(accounts, programAccounts...)
-	programAccounts, err = p.getAMMPoolAccountsByTokenPair(ctx, quoteMint, baseMint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pools with base token %s: %w", quoteMint, err)
 	}
 	accounts = append(accounts, programAccounts...)
 
@@ -63,7 +62,7 @@ func (p *RaydiumAMMProtocol) getAMMPoolAccountsByTokenPair(ctx context.Context, 
 		return nil, fmt.Errorf("invalid quote mint address: %w", err)
 	}
 
-	return p.SolClient.RpcClient.GetProgramAccountsWithOpts(ctx, raydium.RAYDIUM_AMM_PROGRAM_ID, &rpc.GetProgramAccountsOpts{
+	return p.SolClient.GetProgramAccountsWithOpts(ctx, raydium.RAYDIUM_AMM_PROGRAM_ID, &rpc.GetProgramAccountsOpts{
 		Filters: []rpc.RPCFilter{
 			{
 				DataSize: layout.Span(),
@@ -91,7 +90,7 @@ func (r *RaydiumAMMProtocol) FetchPoolByID(ctx context.Context, poolID string) (
 		return nil, fmt.Errorf("invalid pool ID: %w", err)
 	}
 
-	account, err := r.SolClient.RpcClient.GetAccountInfo(ctx, poolPubkey)
+	account, err := r.SolClient.GetAccountInfoWithOpts(ctx, poolPubkey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pool account %s: %w", poolID, err)
 	}
@@ -134,7 +133,7 @@ func int8ToBuf(value uint8) []byte {
 }
 
 func (p *RaydiumAMMProtocol) processAMMPool(ctx context.Context, layout *raydium.AMMPool) error {
-	marketAccount, err := p.SolClient.RpcClient.GetAccountInfo(ctx, layout.MarketId)
+	marketAccount, err := p.SolClient.GetAccountInfoWithOpts(ctx, layout.MarketId)
 	if err != nil {
 		return fmt.Errorf("failed to get market account: %w", err)
 	}

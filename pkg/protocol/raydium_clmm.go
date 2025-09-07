@@ -7,9 +7,9 @@ import (
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg"
-	"github.com/yimingWOW/solroute/pkg/pool/raydium"
-	"github.com/yimingWOW/solroute/pkg/sol"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/pool/raydium"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
 type RaydiumClmmProtocol struct {
@@ -22,16 +22,15 @@ func NewRaydiumClmm(solClient *sol.Client) *RaydiumClmmProtocol {
 	}
 }
 
+func (p *RaydiumClmmProtocol) ProtocolName() pkg.ProtocolName {
+	return pkg.ProtocolNameRaydiumClmm
+}
+
 func (p *RaydiumClmmProtocol) FetchPoolsByPair(ctx context.Context, baseMint string, quoteMint string) ([]pkg.Pool, error) {
 	accounts := make([]*rpc.KeyedAccount, 0)
 	programAccounts, err := p.getCLMMPoolAccountsByTokenPair(ctx, baseMint, quoteMint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch pools with base token %s: %w", baseMint, err)
-	}
-	accounts = append(accounts, programAccounts...)
-	programAccounts, err = p.getCLMMPoolAccountsByTokenPair(ctx, quoteMint, baseMint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pools with base token %s: %w", quoteMint, err)
 	}
 	accounts = append(accounts, programAccounts...)
 
@@ -44,7 +43,7 @@ func (p *RaydiumClmmProtocol) FetchPoolsByPair(ctx context.Context, baseMint str
 		}
 		layout.PoolId = v.Pubkey
 
-		ammConfigData, err := p.SolClient.RpcClient.GetAccountInfo(ctx, layout.AmmConfig)
+		ammConfigData, err := p.SolClient.GetAccountInfoWithOpts(ctx, layout.AmmConfig)
 		if err != nil {
 			continue
 		}
@@ -76,7 +75,7 @@ func (p *RaydiumClmmProtocol) getCLMMPoolAccountsByTokenPair(ctx context.Context
 	}
 
 	var knownPoolLayout raydium.CLMMPool
-	result, err := p.SolClient.RpcClient.GetProgramAccountsWithOpts(ctx, raydium.RAYDIUM_CLMM_PROGRAM_ID, &rpc.GetProgramAccountsOpts{
+	result, err := p.SolClient.GetProgramAccountsWithOpts(ctx, raydium.RAYDIUM_CLMM_PROGRAM_ID, &rpc.GetProgramAccountsOpts{
 		Filters: []rpc.RPCFilter{
 			{
 				DataSize: uint64(knownPoolLayout.Span()),
@@ -107,7 +106,7 @@ func (r *RaydiumClmmProtocol) FetchPoolByID(ctx context.Context, poolId string) 
 	if err != nil {
 		return nil, fmt.Errorf("invalid pool id: %w", err)
 	}
-	account, err := r.SolClient.RpcClient.GetAccountInfo(ctx, poolIdKey)
+	account, err := r.SolClient.GetAccountInfoWithOpts(ctx, poolIdKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pool account %s: %w", poolId, err)
 	}

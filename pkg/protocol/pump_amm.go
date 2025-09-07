@@ -6,9 +6,9 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/yimingWOW/solroute/pkg"
-	"github.com/yimingWOW/solroute/pkg/pool/pump"
-	"github.com/yimingWOW/solroute/pkg/sol"
+	"github.com/yimingwow/solroute/pkg"
+	"github.com/yimingwow/solroute/pkg/pool/pump"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
 type PumpAmmProtocol struct {
@@ -21,16 +21,15 @@ func NewPumpAmm(solClient *sol.Client) *PumpAmmProtocol {
 	}
 }
 
+func (p *PumpAmmProtocol) ProtocolName() pkg.ProtocolName {
+	return pkg.ProtocolNamePumpAmm
+}
+
 func (p *PumpAmmProtocol) FetchPoolsByPair(ctx context.Context, baseMint string, quoteMint string) ([]pkg.Pool, error) {
 	programAccounts := rpc.GetProgramAccountsResult{}
 	data, err := p.getPumpAMMPoolAccountsByTokenPair(ctx, baseMint, quoteMint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch pools with base token %s: %w", baseMint, err)
-	}
-	programAccounts = append(programAccounts, data...)
-	data, err = p.getPumpAMMPoolAccountsByTokenPair(ctx, quoteMint, baseMint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pools with base token %s: %w", quoteMint, err)
 	}
 	programAccounts = append(programAccounts, data...)
 
@@ -57,7 +56,7 @@ func (p *PumpAmmProtocol) getPumpAMMPoolAccountsByTokenPair(ctx context.Context,
 		return nil, fmt.Errorf("invalid quote mint address: %w", err)
 	}
 
-	return p.SolClient.RpcClient.GetProgramAccountsWithOpts(ctx, pump.PumpSwapProgramID, &rpc.GetProgramAccountsOpts{
+	return p.SolClient.GetProgramAccountsWithOpts(ctx, pump.PumpSwapProgramID, &rpc.GetProgramAccountsOpts{
 		Filters: []rpc.RPCFilter{
 			{
 				DataSize: layout.Span(),
@@ -84,7 +83,7 @@ func (p *PumpAmmProtocol) FetchPoolByID(ctx context.Context, poolId string) (pkg
 		return nil, fmt.Errorf("invalid pool ID: %w", err)
 	}
 
-	account, err := p.SolClient.RpcClient.GetAccountInfo(ctx, poolPubkey)
+	account, err := p.SolClient.GetAccountInfoWithOpts(ctx, poolPubkey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pool account %s: %w", poolId, err)
 	}

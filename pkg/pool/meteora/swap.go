@@ -5,32 +5,36 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log"
 
 	"cosmossdk.io/math"
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/yimingwow/solroute/pkg/sol"
 )
 
 // BuildSwapInstructions creates Solana instructions for performing a swap operation
 func (pool *MeteoraDlmmPool) BuildSwapInstructions(
 	ctx context.Context,
-	solClient *rpc.Client,
+	solClient *sol.Client,
 	user solana.PublicKey,
 	inputMint string,
 	inputAmount math.Int,
 	minOut math.Int,
+	userBaseAccount solana.PublicKey,
+	userQuoteAccount solana.PublicKey,
 ) ([]solana.Instruction, error) {
 	instructions := []solana.Instruction{}
 
-	var userQuoteAccount solana.PublicKey
-	var userBaseAccount solana.PublicKey
+	var userInTokenAccount solana.PublicKey
+	var userOutTokenAccount solana.PublicKey
+	log.Printf("inputMint: %v, pool.TokenXMint: %v,if:%v", inputMint, pool.TokenXMint.String(), inputMint == pool.TokenXMint.String())
 	if inputMint == pool.TokenXMint.String() {
-		userBaseAccount = pool.UserBaseAccount
-		userQuoteAccount = pool.UserQuoteAccount
+		userInTokenAccount = userBaseAccount
+		userOutTokenAccount = userQuoteAccount
 	} else {
-		userBaseAccount = pool.UserQuoteAccount
-		userQuoteAccount = pool.UserBaseAccount
+		userInTokenAccount = userQuoteAccount
+		userOutTokenAccount = userBaseAccount
 	}
 
 	instruction := SwapInstruction{
@@ -63,8 +67,8 @@ func (pool *MeteoraDlmmPool) BuildSwapInstructions(
 	}
 	instruction.AccountMetaSlice[2] = solana.NewAccountMeta(pool.reserveX, true, false)
 	instruction.AccountMetaSlice[3] = solana.NewAccountMeta(pool.reserveY, true, false)
-	instruction.AccountMetaSlice[4] = solana.NewAccountMeta(userBaseAccount, true, false)
-	instruction.AccountMetaSlice[5] = solana.NewAccountMeta(userQuoteAccount, true, false)
+	instruction.AccountMetaSlice[4] = solana.NewAccountMeta(userInTokenAccount, true, false)
+	instruction.AccountMetaSlice[5] = solana.NewAccountMeta(userOutTokenAccount, true, false)
 	instruction.AccountMetaSlice[6] = solana.NewAccountMeta(pool.TokenXMint, false, false)
 	instruction.AccountMetaSlice[7] = solana.NewAccountMeta(pool.TokenYMint, false, false)
 	instruction.AccountMetaSlice[8] = solana.NewAccountMeta(pool.oracle, true, false)
